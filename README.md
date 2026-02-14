@@ -3,6 +3,16 @@
 `push_image` creates an Image entity that updates when a webhook receives a
 JSON payload containing an image URL.
 
+## Install with HACS
+
+1. Open HACS in Home Assistant.
+2. Go to `Integrations`.
+3. Open the menu (top-right) and select `Custom repositories`.
+4. Add this repository URL and choose category `Integration`.
+5. Find `Push Image` in HACS and select `Download`.
+6. Restart Home Assistant.
+7. Add the integration from `Settings` → `Devices & services` → `Add integration`.
+
 ## Setup
 
 1. Add the integration from the UI.
