@@ -6,18 +6,18 @@ from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.image import ImageEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
 
-from . import SIGNAL_UPDATED
-from .const import CONF_WEBHOOK_ID, DOMAIN
+from . import SIGNAL_UPDATED, PushImageConfigEntry
+from .const import CONF_WEBHOOK_ID
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: PushImageConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Push Image image entity from a config entry."""
     async_add_entities([PushImageEntity(hass, entry)])
@@ -28,7 +28,7 @@ class PushImageEntity(ImageEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: PushImageConfigEntry) -> None:
         """Initialize the Push Image entity."""
         super().__init__(hass)
         self._entry = entry
@@ -39,23 +39,22 @@ class PushImageEntity(ImageEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes for the entity."""
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
+        runtime_data = self._entry.runtime_data
         webhook_id = self._entry.data.get(CONF_WEBHOOK_ID)
         return {
-            "last_url": data.get("last_url"),
-            "image_last_updated": data.get("last_update_ts"),
+            "last_url": runtime_data.last_url,
+            "image_last_updated": (
+                runtime_data.last_updated.isoformat()
+                if runtime_data.last_updated is not None
+                else None
+            ),
             "webhook_id": webhook_id,
             "webhook_url": f"/api/webhook/{webhook_id}" if webhook_id else None,
         }
 
     def _update_last_updated_attr(self) -> None:
         """Update native image_last_updated from runtime data."""
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
-        ts = data.get("last_update_ts")
-        if isinstance(ts, str):
-            self._attr_image_last_updated = dt_util.parse_datetime(ts)
-            return
-        self._attr_image_last_updated = None
+        self._attr_image_last_updated = self._entry.runtime_data.last_updated
 
     async def async_added_to_hass(self) -> None:
         """Handle entity addition to Home Assistant."""
@@ -77,10 +76,10 @@ class PushImageEntity(ImageEntity):
 
     async def async_image(self) -> bytes | None:
         """Return the currently stored image bytes."""
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
+        runtime_data = self._entry.runtime_data
         # Update content type dynamically
-        ct = data.get("content_type") or "image/jpeg"
+        ct = runtime_data.content_type or "image/jpeg"
         self._attr_content_type = ct
         self._update_last_updated_attr()
-        image_bytes = data.get("bytes")
+        image_bytes = runtime_data.image_bytes
         return image_bytes if isinstance(image_bytes, bytes) else None

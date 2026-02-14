@@ -4,27 +4,35 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_JSON_KEY, CONF_WEBHOOK_ID, DEFAULT_JSON_KEY, DOMAIN
+from . import PushImageConfigEntry
+from .const import CONF_JSON_KEY, CONF_WEBHOOK_ID, DEFAULT_JSON_KEY
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, config_entry: ConfigEntry
+    hass: HomeAssistant, config_entry: PushImageConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    data: dict[str, Any] = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
+    runtime_data = config_entry.runtime_data
     json_key = config_entry.data.get(CONF_JSON_KEY, DEFAULT_JSON_KEY)
 
     diagnostics: dict[str, Any] = {
         "webhook_id": config_entry.data.get(CONF_WEBHOOK_ID),
-        "last_update": data.get("last_update_ts"),
-        "image_last_updated": data.get("last_update_ts"),
-        "last_image_size": data.get("last_image_size"),
+        "last_update": (
+            runtime_data.last_updated.isoformat()
+            if runtime_data.last_updated is not None
+            else None
+        ),
+        "image_last_updated": (
+            runtime_data.last_updated.isoformat()
+            if runtime_data.last_updated is not None
+            else None
+        ),
+        "last_image_size": runtime_data.last_image_size,
     }
 
     if json_key:
-        diagnostics["last_url"] = data.get("last_url")
+        diagnostics["last_url"] = runtime_data.last_url
 
     return diagnostics

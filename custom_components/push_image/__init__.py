@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import functools
+from dataclasses import dataclass
+from datetime import datetime
 from json import JSONDecodeError
 import logging
 from pathlib import Path
@@ -38,6 +39,21 @@ SIGNAL_UPDATED = f"{DOMAIN}_updated"
 PLATFORMS: list[str] = ["image"]
 
 
+@dataclass(slots=True)
+class PushImageRuntimeData:
+    """Runtime data for Push Image."""
+
+    image_bytes: bytes | None = None
+    content_type: str | None = None
+    last_url: str | None = None
+    last_update_monotonic: float = 0.0
+    last_updated: datetime | None = None
+    last_image_size: int | None = None
+
+
+type PushImageConfigEntry = ConfigEntry[PushImageRuntimeData]
+
+
 def _storage_path(hass: HomeAssistant, entry_id: str) -> Path:
     """Return path for persisted image bytes."""
     # Use HA's config directory; store under .storage/push_image/<entry_id>.bin
@@ -59,8 +75,8 @@ async def _load_last_bytes(hass: HomeAssistant, entry_id: str) -> bytes | None:
 
 async def _load_last_updated_timestamp(
     hass: HomeAssistant, entry_id: str
-) -> str | None:
-    """Load persisted image modification time as an ISO UTC timestamp."""
+) -> datetime | None:
+    """Load persisted image modification time as a UTC timestamp."""
     path = _storage_path(hass, entry_id)
     try:
         stat_result = await hass.async_add_executor_job(path.stat)
@@ -70,17 +86,20 @@ async def _load_last_updated_timestamp(
         _LOGGER.exception("Failed reading stored image metadata for %s", entry_id)
         return None
 
-    return dt_util.utc_from_timestamp(stat_result.st_mtime).isoformat()
+    return dt_util.utc_from_timestamp(stat_result.st_mtime)
 
 
 async def _save_last_bytes(hass: HomeAssistant, entry_id: str, data: bytes) -> None:
     """Persist image bytes for an entry."""
+
+    def _write_bytes(path: Path, content: bytes) -> None:
+        """Write image bytes to disk with parent creation."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
     path = _storage_path(hass, entry_id)
     try:
-        await hass.async_add_executor_job(
-            functools.partial(path.parent.mkdir, parents=True, exist_ok=True)
-        )
-        await hass.async_add_executor_job(path.write_bytes, data)
+        await hass.async_add_executor_job(_write_bytes, path, data)
     except OSError:
         _LOGGER.exception("Failed writing stored image for %s", entry_id)
 
@@ -96,7 +115,7 @@ def _nested_value(payload: dict[str, Any], key_path: str) -> Any:
 
 
 def _show_webhook_notification(
-    hass: HomeAssistant, entry: ConfigEntry, webhook_id: str
+    hass: HomeAssistant, entry: PushImageConfigEntry, webhook_id: str
 ) -> None:
     """Show a persistent notification with webhook details."""
     webhook_path = f"/api/webhook/{webhook_id}"
@@ -113,31 +132,19 @@ def _show_webhook_notification(
     )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) -> bool:
     """Set up Push Image from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN].setdefault(
-        entry.entry_id,
-        {
-            "bytes": None,
-            "content_type": None,
-            "last_url": None,
-            "last_update": 0.0,
-            "last_update_ts": None,
-            "last_image_size": None,
-        },
-    )
+    entry.runtime_data = PushImageRuntimeData()
 
     # Restore bytes on startup (best-effort)
     restored = await _load_last_bytes(hass, entry.entry_id)
     if restored:
         restored_ts = await _load_last_updated_timestamp(hass, entry.entry_id)
-        hass.data[DOMAIN][entry.entry_id]["bytes"] = restored
-        hass.data[DOMAIN][entry.entry_id]["content_type"] = (
-            "image/jpeg"  # unknown; assume jpeg
-        )
-        hass.data[DOMAIN][entry.entry_id]["last_image_size"] = len(restored)
-        hass.data[DOMAIN][entry.entry_id]["last_update_ts"] = restored_ts
+        entry.runtime_data.image_bytes = restored
+        # Content type for restored bytes is unknown; keep JPEG default fallback.
+        entry.runtime_data.content_type = "image/jpeg"
+        entry.runtime_data.last_image_size = len(restored)
+        entry.runtime_data.last_updated = restored_ts
         async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id)
 
     session = async_get_clientsession(hass)
@@ -170,8 +177,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         now = time.monotonic()
-        data = hass.data[DOMAIN][entry.entry_id]
-        if now - data["last_update"] < DEBOUNCE_SECONDS:
+        runtime_data = entry.runtime_data
+        if now - runtime_data.last_update_monotonic < DEBOUNCE_SECONDS:
             return web.Response(text="Ignored", status=200)
 
         try:
@@ -189,12 +196,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return web.Response(text="Fetch failed", status=502)
 
-        data["bytes"] = img
-        data["content_type"] = content_type
-        data["last_url"] = url
-        data["last_update"] = now
-        data["last_update_ts"] = dt_util.utcnow().isoformat()
-        data["last_image_size"] = len(img)
+        runtime_data.image_bytes = img
+        runtime_data.content_type = content_type
+        runtime_data.last_url = url
+        runtime_data.last_update_monotonic = now
+        runtime_data.last_updated = dt_util.utcnow()
+        runtime_data.last_image_size = len(img)
 
         _LOGGER.debug(
             "Fetched image for entry %s (content-type=%s size=%s bytes)",
@@ -238,12 +245,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: PushImageConfigEntry) -> bool:
     """Unload a Push Image config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        data = hass.data.get(DOMAIN, {})
-        data.pop(entry.entry_id, None)
-        if not data:
-            hass.data.pop(DOMAIN, None)
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
