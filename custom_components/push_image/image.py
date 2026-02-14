@@ -42,6 +42,7 @@ class PushImageEntity(ImageEntity):
         webhook_id = self._entry.data.get(CONF_WEBHOOK_ID)
         return {
             "last_url": data.get("last_url"),
+            "image_last_updated": data.get("last_update_ts"),
             "webhook_id": webhook_id,
             "webhook_url": f"/api/webhook/{webhook_id}" if webhook_id else None,
         }

@@ -41,9 +41,14 @@ class PushImageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             title = str(user_input[CONF_NAME]).strip()
+            json_key = str(user_input[CONF_JSON_KEY]).strip()
+
             if not title:
                 errors["base"] = "name_required"
+            elif not json_key:
+                errors["base"] = "json_key_required"
             else:
+                user_input[CONF_JSON_KEY] = json_key
                 token = user_input.get(CONF_TOKEN)
                 if token is not None:
                     user_input[CONF_TOKEN] = str(token).strip()

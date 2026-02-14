@@ -13,7 +13,8 @@
       }
     },
     "error": {
-      "name_required": "Name is required."
+      "name_required": "Name is required.",
+      "json_key_required": "JSON key is required."
     }
   }
 }

@@ -20,6 +20,7 @@ async def async_get_config_entry_diagnostics(
     diagnostics: dict[str, Any] = {
         "webhook_id": config_entry.data.get(CONF_WEBHOOK_ID),
         "last_update": data.get("last_update_ts"),
+        "image_last_updated": data.get("last_update_ts"),
         "last_image_size": data.get("last_image_size"),
     }
 
