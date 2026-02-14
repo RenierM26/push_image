@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Push Image",
+        "description": "Create an image entity updated via webhook. The webhook receives JSON containing an image URL.",
+        "data": {
+          "name": "Name",
+          "json_key": "JSON key containing image URL",
+          "ssl_verify": "Verify SSL certificate when fetching image URL",
+          "token": "Optional token required in X-Push-Image-Token header"
+        }
+      }
+    },
+    "error": {
+      "name_required": "Name is required."
+    }
+  }
+}

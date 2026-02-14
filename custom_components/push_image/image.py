@@ -1,0 +1,71 @@
+"""Image platform for Push Image integration."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from homeassistant.components.image import ImageEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from . import SIGNAL_UPDATED
+from .const import CONF_WEBHOOK_ID, DOMAIN
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up Push Image image entity from a config entry."""
+    async_add_entities([PushImageEntity(hass, entry)])
+
+
+class PushImageEntity(ImageEntity):
+    """Image entity that stores the most recently pushed image."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the Push Image entity."""
+        super().__init__(hass)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}"
+        self._attr_name = entry.title
+        self._unsub: Callable[[], None] | None = None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes for the entity."""
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
+        webhook_id = self._entry.data.get(CONF_WEBHOOK_ID)
+        return {
+            "last_url": data.get("last_url"),
+            "webhook_id": webhook_id,
+            "webhook_url": f"/api/webhook/{webhook_id}" if webhook_id else None,
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity addition to Home Assistant."""
+        @callback
+        def _updated(entry_id: str) -> None:
+            if entry_id == self._entry.entry_id:
+                self.async_write_ha_state()
+
+        self._unsub = async_dispatcher_connect(self.hass, SIGNAL_UPDATED, _updated)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Handle entity removal from Home Assistant."""
+        if self._unsub:
+            self._unsub()
+            self._unsub = None
+
+    async def async_image(self) -> bytes | None:
+        """Return the currently stored image bytes."""
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
+        # Update content type dynamically
+        ct = data.get("content_type") or "image/jpeg"
+        self._attr_content_type = ct
+        image_bytes = data.get("bytes")
+        return image_bytes if isinstance(image_bytes, bytes) else None
