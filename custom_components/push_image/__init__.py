@@ -57,6 +57,22 @@ async def _load_last_bytes(hass: HomeAssistant, entry_id: str) -> bytes | None:
         return None
 
 
+async def _load_last_updated_timestamp(
+    hass: HomeAssistant, entry_id: str
+) -> str | None:
+    """Load persisted image modification time as an ISO UTC timestamp."""
+    path = _storage_path(hass, entry_id)
+    try:
+        stat_result = await hass.async_add_executor_job(path.stat)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        _LOGGER.exception("Failed reading stored image metadata for %s", entry_id)
+        return None
+
+    return dt_util.utc_from_timestamp(stat_result.st_mtime).isoformat()
+
+
 async def _save_last_bytes(hass: HomeAssistant, entry_id: str, data: bytes) -> None:
     """Persist image bytes for an entry."""
     path = _storage_path(hass, entry_id)
@@ -115,11 +131,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Restore bytes on startup (best-effort)
     restored = await _load_last_bytes(hass, entry.entry_id)
     if restored:
+        restored_ts = await _load_last_updated_timestamp(hass, entry.entry_id)
         hass.data[DOMAIN][entry.entry_id]["bytes"] = restored
         hass.data[DOMAIN][entry.entry_id]["content_type"] = (
             "image/jpeg"  # unknown; assume jpeg
         )
         hass.data[DOMAIN][entry.entry_id]["last_image_size"] = len(restored)
+        hass.data[DOMAIN][entry.entry_id]["last_update_ts"] = restored_ts
         async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id)
 
     session = async_get_clientsession(hass)
