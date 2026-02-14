@@ -1,11 +1,11 @@
 {
   "domain": "push_image",
   "name": "Push Image",
+  "codeowners": ["@RenierM26"],
   "config_flow": true,
   "documentation": "https://github.com/RenierM26/push_image",
-  "issue_tracker": "https://github.com/RenierM26/push_image/issues",
-  "codeowners": ["@RenierM26"],
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/RenierM26/push_image/issues",
   "requirements": [],
   "version": "0.1.0"
 }
