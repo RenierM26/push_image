@@ -11,11 +11,13 @@ JSON payload containing an image URL.
    - `JSON key`: key path to the image URL (supports nested paths like
      `event.image_url`).
    - `Verify SSL`: enable certificate validation when fetching the URL.
-   - `Token` (optional): required value for `X-Push-Image-Token`.
+   - `Token` (optional): if set, webhook requests must include
+     `X-Push-Image-Token`.
 3. Save.
 4. Open the entity attributes to get:
    - `webhook_id`
    - `webhook_url` (for example `/api/webhook/<webhook_id>`)
+   - `image_last_updated`
 5. Check notifications in Home Assistant:
    - On first setup, the integration creates a persistent notification with the
      webhook path you can copy.
