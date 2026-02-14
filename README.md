@@ -34,17 +34,18 @@ curl -X POST \
 
 ## Example Synology payload
 
-If your `JSON key` is `event.image_url`:
+Use this with `JSON key` set to `image_url`:
 
 ```json
 {
-  "event": {
-    "image_url": "https://nas.local:5001/webapi/entry.cgi?..."
-  },
-  "camera": "Front door",
-  "time": "2026-02-14T08:00:00Z"
+  "image_url": "https://nas.local:5001/webapi/SurveillanceStation/Webhook/GetThumbnail/v1/example-0/THUMBNAIL_URL.jpg?v=11880",
+  "camera": "Camera01",
+  "time": "2023-02-01T15:05:39"
 }
 ```
+
+Only the configured `JSON key` value is used for image fetching. Other fields
+such as `camera` and `time` are accepted but ignored by the integration.
 
 ## Security token
 
