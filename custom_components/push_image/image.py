@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import SIGNAL_UPDATED
 from .const import CONF_WEBHOOK_ID, DOMAIN
@@ -47,11 +48,23 @@ class PushImageEntity(ImageEntity):
             "webhook_url": f"/api/webhook/{webhook_id}" if webhook_id else None,
         }
 
+    def _update_last_updated_attr(self) -> None:
+        """Update native image_last_updated from runtime data."""
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id, {})
+        ts = data.get("last_update_ts")
+        if isinstance(ts, str):
+            self._attr_image_last_updated = dt_util.parse_datetime(ts)
+            return
+        self._attr_image_last_updated = None
+
     async def async_added_to_hass(self) -> None:
         """Handle entity addition to Home Assistant."""
+        self._update_last_updated_attr()
+
         @callback
         def _updated(entry_id: str) -> None:
             if entry_id == self._entry.entry_id:
+                self._update_last_updated_attr()
                 self.async_write_ha_state()
 
         self._unsub = async_dispatcher_connect(self.hass, SIGNAL_UPDATED, _updated)
@@ -68,5 +81,6 @@ class PushImageEntity(ImageEntity):
         # Update content type dynamically
         ct = data.get("content_type") or "image/jpeg"
         self._attr_content_type = ct
+        self._update_last_updated_attr()
         image_bytes = data.get("bytes")
         return image_bytes if isinstance(image_bytes, bytes) else None
