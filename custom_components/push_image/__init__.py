@@ -313,6 +313,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
     if entry_data != entry.data:
         hass.config_entries.async_update_entry(entry, data=entry_data)
 
+    # Defensive unregister to avoid duplicate handler errors during reloads.
+    webhook.async_unregister(hass, webhook_id)
     webhook.async_register(
         hass,
         DOMAIN,
@@ -328,6 +330,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
 
 async def async_unload_entry(hass: HomeAssistant, entry: PushImageConfigEntry) -> bool:
     """Unload a Push Image config entry."""
+    webhook_id = entry.data.get(CONF_WEBHOOK_ID)
+    if webhook_id:
+        webhook.async_unregister(hass, webhook_id)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
