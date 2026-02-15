@@ -76,6 +76,16 @@ def _parse_device_name_filters(value: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(normalized))
 
 
+def _match_device_name_filter(
+    configured_filters: tuple[str, ...], device_name: str
+) -> str | None:
+    """Return first configured filter that is contained in the device name."""
+    for configured_filter in configured_filters:
+        if configured_filter in device_name:
+            return configured_filter
+    return None
+
+
 def _entry_value(entry: PushImageConfigEntry, key: str, default: Any) -> Any:
     """Return an entry value from options first, then data."""
     return entry.options.get(key, entry.data.get(key, default))
@@ -245,13 +255,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
                     entry.entry_id,
                 )
                 return web.Response(text="Ignored", status=200)
-            if device_name not in runtime_data.configured_device_names:
+            matched_filter = _match_device_name_filter(
+                runtime_data.configured_device_names, device_name
+            )
+            if matched_filter is None:
                 _LOGGER.debug(
                     "Ignoring webhook for entry %s due to device filter mismatch",
                     entry.entry_id,
                 )
                 return web.Response(text="Ignored", status=200)
-            entity_key = device_name
+            entity_key = matched_filter
         else:
             entity_key = DEFAULT_ENTITY_KEY
 
