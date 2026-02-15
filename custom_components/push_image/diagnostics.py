@@ -30,6 +30,7 @@ async def async_get_config_entry_diagnostics(
             else None
         ),
         "last_image_size": runtime_data.last_image_size,
+        "last_device_name": runtime_data.last_device_name,
     }
 
     if json_key:

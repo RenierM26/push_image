@@ -20,6 +20,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_DEVICE_NAME_FILTER,
+    CONF_DEVICE_NAME_KEY,
     CONF_JSON_KEY,
     CONF_SSL_VERIFY,
     CONF_TOKEN,
@@ -49,6 +51,7 @@ class PushImageRuntimeData:
     last_update_monotonic: float = 0.0
     last_updated: datetime | None = None
     last_image_size: int | None = None
+    last_device_name: str | None = None
 
 
 type PushImageConfigEntry = ConfigEntry[PushImageRuntimeData]
@@ -149,6 +152,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
 
     session = async_get_clientsession(hass)
     json_key: str = entry.data.get(CONF_JSON_KEY, DEFAULT_JSON_KEY)
+    device_name_key: str = entry.data.get(CONF_DEVICE_NAME_KEY, "")
+    device_name_filter: str = entry.data.get(CONF_DEVICE_NAME_FILTER, "")
     ssl_verify: bool = bool(entry.data.get(CONF_SSL_VERIFY, False))
     token: str = entry.data.get(CONF_TOKEN, "")
 
@@ -175,6 +180,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
             return web.Response(
                 text=f"Missing or invalid JSON key '{json_key}'", status=400
             )
+        device_name: str | None = None
+        if device_name_key:
+            raw_device_name = _nested_value(payload, device_name_key)
+            if isinstance(raw_device_name, str):
+                device_name = raw_device_name.strip()
+
+        if device_name_filter and device_name != device_name_filter:
+            _LOGGER.debug(
+                "Ignoring webhook for entry %s due to device filter mismatch",
+                entry.entry_id,
+            )
+            return web.Response(text="Ignored", status=200)
 
         now = time.monotonic()
         runtime_data = entry.runtime_data
@@ -202,6 +219,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
         runtime_data.last_update_monotonic = now
         runtime_data.last_updated = dt_util.utcnow()
         runtime_data.last_image_size = len(img)
+        runtime_data.last_device_name = device_name
 
         _LOGGER.debug(
             "Fetched image for entry %s (content-type=%s size=%s bytes)",
