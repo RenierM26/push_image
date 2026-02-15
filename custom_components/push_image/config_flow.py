@@ -16,12 +16,16 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_DEVICE_NAME_FILTER,
+    CONF_DEVICE_NAME_KEY,
     CONF_JSON_KEY,
     CONF_NAME,
     CONF_SSL_VERIFY,
     CONF_TOKEN,
     CONF_WEBHOOK_ID,
     CONF_WEBHOOK_NOTIFIED,
+    DEFAULT_DEVICE_NAME_FILTER,
+    DEFAULT_DEVICE_NAME_KEY,
     DEFAULT_JSON_KEY,
     DEFAULT_SSL_VERIFY,
     DOMAIN,
@@ -42,13 +46,21 @@ class PushImageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             title = str(user_input[CONF_NAME]).strip()
             json_key = str(user_input[CONF_JSON_KEY]).strip()
+            device_name_key = str(user_input.get(CONF_DEVICE_NAME_KEY, "")).strip()
+            device_name_filter = str(
+                user_input.get(CONF_DEVICE_NAME_FILTER, "")
+            ).strip()
 
             if not title:
                 errors["base"] = "name_required"
             elif not json_key:
                 errors["base"] = "json_key_required"
+            elif device_name_filter and not device_name_key:
+                errors["base"] = "device_name_key_required"
             else:
                 user_input[CONF_JSON_KEY] = json_key
+                user_input[CONF_DEVICE_NAME_KEY] = device_name_key
+                user_input[CONF_DEVICE_NAME_FILTER] = device_name_filter
                 token = user_input.get(CONF_TOKEN)
                 if token is not None:
                     user_input[CONF_TOKEN] = str(token).strip()
@@ -64,6 +76,12 @@ class PushImageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_JSON_KEY, default=DEFAULT_JSON_KEY): TextSelector(
                     TextSelectorConfig()
                 ),
+                vol.Optional(
+                    CONF_DEVICE_NAME_KEY, default=DEFAULT_DEVICE_NAME_KEY
+                ): TextSelector(TextSelectorConfig()),
+                vol.Optional(
+                    CONF_DEVICE_NAME_FILTER, default=DEFAULT_DEVICE_NAME_FILTER
+                ): TextSelector(TextSelectorConfig()),
                 vol.Optional(
                     CONF_SSL_VERIFY, default=DEFAULT_SSL_VERIFY
                 ): BooleanSelector(),

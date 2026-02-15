@@ -43,6 +43,7 @@ class PushImageEntity(ImageEntity):
         webhook_id = self._entry.data.get(CONF_WEBHOOK_ID)
         return {
             "last_url": runtime_data.last_url,
+            "last_device_name": runtime_data.last_device_name,
             "image_last_updated": (
                 runtime_data.last_updated.isoformat()
                 if runtime_data.last_updated is not None

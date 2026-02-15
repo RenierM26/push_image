@@ -20,6 +20,10 @@ JSON payload containing an image URL.
    - `Name`: entity display name.
    - `JSON key`: key path to the image URL (supports nested paths like
      `event.image_url`).
+   - `Device name key` (optional): key path for device/camera name in payload
+     (for example `camera`).
+   - `Device name filter` (optional): only accept webhook payloads where the
+     parsed device name matches this value.
    - `Verify SSL`: enable certificate validation when fetching the URL.
    - `Token` (optional): if set, webhook requests must include
      `X-Push-Image-Token`.
@@ -44,7 +48,10 @@ curl -X POST \
 
 ## Example Synology payload
 
-Use this with `JSON key` set to `image_url`:
+Use this with:
+- `JSON key` = `image_url`
+- `Device name key` = `camera`
+- `Device name filter` = `Camera01` (optional)
 
 ```json
 {
@@ -54,8 +61,9 @@ Use this with `JSON key` set to `image_url`:
 }
 ```
 
-Only the configured `JSON key` value is used for image fetching. Other fields
-such as `camera` and `time` are accepted but ignored by the integration.
+The integration always uses `JSON key` for the image URL. It uses
+`Device name key` only when set, and applies `Device name filter` only when
+configured. Other fields such as `time` are ignored.
 
 ## Security token
 
