@@ -8,7 +8,7 @@
           "name": "Name",
           "json_key": "JSON key containing image URL",
           "device_name_key": "Optional JSON key containing device name",
-          "device_name_filter": "Optional device name filter value",
+          "device_name_filter": "Optional device name filter value(s), comma-separated",
           "ssl_verify": "Verify SSL certificate when fetching image URL",
           "token": "Optional token required in X-Push-Image-Token header"
         }
@@ -18,6 +18,21 @@
       "name_required": "Name is required.",
       "json_key_required": "JSON key is required.",
       "device_name_key_required": "Device name key is required when using a device name filter."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Push Image options",
+        "data": {
+          "name": "Name",
+          "json_key": "JSON key containing image URL",
+          "device_name_key": "Optional JSON key containing device name",
+          "device_name_filter": "Optional device name filter value(s), comma-separated",
+          "ssl_verify": "Verify SSL certificate when fetching image URL",
+          "token": "Optional token required in X-Push-Image-Token header"
+        }
+      }
     }
   }
 }

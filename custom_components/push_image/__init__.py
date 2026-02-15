@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from json import JSONDecodeError
 import logging
@@ -17,7 +17,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     CONF_DEVICE_NAME_FILTER,
@@ -39,11 +39,12 @@ _LOGGER = logging.getLogger(__name__)
 SIGNAL_UPDATED = f"{DOMAIN}_updated"
 
 PLATFORMS: list[str] = ["image"]
+DEFAULT_ENTITY_KEY = "__default__"
 
 
 @dataclass(slots=True)
-class PushImageRuntimeData:
-    """Runtime data for Push Image."""
+class PushImageEntityData:
+    """Per-entity runtime data for Push Image."""
 
     image_bytes: bytes | None = None
     content_type: str | None = None
@@ -52,59 +53,90 @@ class PushImageRuntimeData:
     last_updated: datetime | None = None
     last_image_size: int | None = None
     last_device_name: str | None = None
+    last_raw_message: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class PushImageRuntimeData:
+    """Runtime data for Push Image."""
+
+    entities: dict[str, PushImageEntityData] = field(default_factory=dict)
+    configured_device_names: tuple[str, ...] = ()
+    last_raw_message: dict[str, Any] | None = None
 
 
 type PushImageConfigEntry = ConfigEntry[PushImageRuntimeData]
 
 
-def _storage_path(hass: HomeAssistant, entry_id: str) -> Path:
+def _parse_device_name_filters(value: str) -> tuple[str, ...]:
+    """Parse and normalize comma-separated device name filters."""
+    parts = [part.strip() for part in value.split(",")]
+    normalized = [part for part in parts if part]
+    # Keep order stable and remove duplicates.
+    return tuple(dict.fromkeys(normalized))
+
+
+def _entry_value(entry: PushImageConfigEntry, key: str, default: Any) -> Any:
+    """Return an entry value from options first, then data."""
+    return entry.options.get(key, entry.data.get(key, default))
+
+
+def _storage_path(hass: HomeAssistant, entry_id: str, entity_key: str) -> Path:
     """Return path for persisted image bytes."""
-    # Use HA's config directory; store under .storage/push_image/<entry_id>.bin
     base = Path(hass.config.path(".storage")) / STORAGE_DIRNAME
-    return base / f"{entry_id}.bin"
+    if entity_key == DEFAULT_ENTITY_KEY:
+        # Keep legacy filename for backward compatibility.
+        return base / f"{entry_id}.bin"
+    return base / f"{entry_id}_{slugify(entity_key)}.bin"
 
 
-async def _load_last_bytes(hass: HomeAssistant, entry_id: str) -> bytes | None:
-    """Load persisted image bytes for an entry."""
-    path = _storage_path(hass, entry_id)
+async def _load_last_bytes(
+    hass: HomeAssistant, entry_id: str, entity_key: str
+) -> bytes | None:
+    """Load persisted image bytes for an entry entity."""
+    path = _storage_path(hass, entry_id, entity_key)
     try:
         return await hass.async_add_executor_job(path.read_bytes)
     except FileNotFoundError:
         return None
     except OSError:
-        _LOGGER.exception("Failed reading stored image for %s", entry_id)
+        _LOGGER.exception("Failed reading stored image for %s (%s)", entry_id, entity_key)
         return None
 
 
 async def _load_last_updated_timestamp(
-    hass: HomeAssistant, entry_id: str
+    hass: HomeAssistant, entry_id: str, entity_key: str
 ) -> datetime | None:
     """Load persisted image modification time as a UTC timestamp."""
-    path = _storage_path(hass, entry_id)
+    path = _storage_path(hass, entry_id, entity_key)
     try:
         stat_result = await hass.async_add_executor_job(path.stat)
     except FileNotFoundError:
         return None
     except OSError:
-        _LOGGER.exception("Failed reading stored image metadata for %s", entry_id)
+        _LOGGER.exception(
+            "Failed reading stored image metadata for %s (%s)", entry_id, entity_key
+        )
         return None
 
     return dt_util.utc_from_timestamp(stat_result.st_mtime)
 
 
-async def _save_last_bytes(hass: HomeAssistant, entry_id: str, data: bytes) -> None:
-    """Persist image bytes for an entry."""
+async def _save_last_bytes(
+    hass: HomeAssistant, entry_id: str, entity_key: str, data: bytes
+) -> None:
+    """Persist image bytes for an entry entity."""
 
     def _write_bytes(path: Path, content: bytes) -> None:
         """Write image bytes to disk with parent creation."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
-    path = _storage_path(hass, entry_id)
+    path = _storage_path(hass, entry_id, entity_key)
     try:
         await hass.async_add_executor_job(_write_bytes, path, data)
     except OSError:
-        _LOGGER.exception("Failed writing stored image for %s", entry_id)
+        _LOGGER.exception("Failed writing stored image for %s (%s)", entry_id, entity_key)
 
 
 def _nested_value(payload: dict[str, Any], key_path: str) -> Any:
@@ -137,25 +169,41 @@ def _show_webhook_notification(
 
 async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) -> bool:
     """Set up Push Image from a config entry."""
-    entry.runtime_data = PushImageRuntimeData()
+    configured_device_names = _parse_device_name_filters(
+        _entry_value(entry, CONF_DEVICE_NAME_FILTER, "")
+    )
+    if configured_device_names:
+        runtime_entities = {
+            device_name: PushImageEntityData(last_device_name=device_name)
+            for device_name in configured_device_names
+        }
+    else:
+        runtime_entities = {DEFAULT_ENTITY_KEY: PushImageEntityData()}
 
-    # Restore bytes on startup (best-effort)
-    restored = await _load_last_bytes(hass, entry.entry_id)
-    if restored:
-        restored_ts = await _load_last_updated_timestamp(hass, entry.entry_id)
-        entry.runtime_data.image_bytes = restored
+    entry.runtime_data = PushImageRuntimeData(
+        entities=runtime_entities,
+        configured_device_names=configured_device_names,
+    )
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+
+    # Restore bytes on startup (best-effort) per entity key.
+    for entity_key, entity_data in entry.runtime_data.entities.items():
+        restored = await _load_last_bytes(hass, entry.entry_id, entity_key)
+        if restored is None:
+            continue
+        restored_ts = await _load_last_updated_timestamp(hass, entry.entry_id, entity_key)
+        entity_data.image_bytes = restored
         # Content type for restored bytes is unknown; keep JPEG default fallback.
-        entry.runtime_data.content_type = "image/jpeg"
-        entry.runtime_data.last_image_size = len(restored)
-        entry.runtime_data.last_updated = restored_ts
-        async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id)
+        entity_data.content_type = "image/jpeg"
+        entity_data.last_image_size = len(restored)
+        entity_data.last_updated = restored_ts
+        async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id, entity_key)
 
     session = async_get_clientsession(hass)
-    json_key: str = entry.data.get(CONF_JSON_KEY, DEFAULT_JSON_KEY)
-    device_name_key: str = entry.data.get(CONF_DEVICE_NAME_KEY, "")
-    device_name_filter: str = entry.data.get(CONF_DEVICE_NAME_FILTER, "")
-    ssl_verify: bool = bool(entry.data.get(CONF_SSL_VERIFY, False))
-    token: str = entry.data.get(CONF_TOKEN, "")
+    json_key: str = _entry_value(entry, CONF_JSON_KEY, DEFAULT_JSON_KEY)
+    device_name_key: str = _entry_value(entry, CONF_DEVICE_NAME_KEY, "")
+    ssl_verify: bool = bool(_entry_value(entry, CONF_SSL_VERIFY, False))
+    token: str = _entry_value(entry, CONF_TOKEN, "")
 
     async def _handle_webhook(
         hass: HomeAssistant, webhook_id: str, request: web.Request
@@ -174,28 +222,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
 
         if not isinstance(payload, dict):
             return web.Response(text="JSON payload must be an object", status=400)
+        payload_dict: dict[str, Any] = payload
+        runtime_data = entry.runtime_data
+        runtime_data.last_raw_message = payload_dict
 
-        url = _nested_value(payload, json_key)
+        url = _nested_value(payload_dict, json_key)
         if not url or not isinstance(url, str):
             return web.Response(
                 text=f"Missing or invalid JSON key '{json_key}'", status=400
             )
+
         device_name: str | None = None
         if device_name_key:
-            raw_device_name = _nested_value(payload, device_name_key)
+            raw_device_name = _nested_value(payload_dict, device_name_key)
             if isinstance(raw_device_name, str):
                 device_name = raw_device_name.strip()
 
-        if device_name_filter and device_name != device_name_filter:
-            _LOGGER.debug(
-                "Ignoring webhook for entry %s due to device filter mismatch",
-                entry.entry_id,
-            )
-            return web.Response(text="Ignored", status=200)
+        if runtime_data.configured_device_names:
+            if device_name is None:
+                _LOGGER.debug(
+                    "Ignoring webhook for entry %s: device name missing",
+                    entry.entry_id,
+                )
+                return web.Response(text="Ignored", status=200)
+            if device_name not in runtime_data.configured_device_names:
+                _LOGGER.debug(
+                    "Ignoring webhook for entry %s due to device filter mismatch",
+                    entry.entry_id,
+                )
+                return web.Response(text="Ignored", status=200)
+            entity_key = device_name
+        else:
+            entity_key = DEFAULT_ENTITY_KEY
 
         now = time.monotonic()
-        runtime_data = entry.runtime_data
-        if now - runtime_data.last_update_monotonic < DEBOUNCE_SECONDS:
+        entity_data = runtime_data.entities[entity_key]
+        if now - entity_data.last_update_monotonic < DEBOUNCE_SECONDS:
             return web.Response(text="Ignored", status=200)
 
         try:
@@ -213,13 +275,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
             )
             return web.Response(text="Fetch failed", status=502)
 
-        runtime_data.image_bytes = img
-        runtime_data.content_type = content_type
-        runtime_data.last_url = url
-        runtime_data.last_update_monotonic = now
-        runtime_data.last_updated = dt_util.utcnow()
-        runtime_data.last_image_size = len(img)
-        runtime_data.last_device_name = device_name
+        entity_data.image_bytes = img
+        entity_data.content_type = content_type
+        entity_data.last_url = url
+        entity_data.last_update_monotonic = now
+        entity_data.last_updated = dt_util.utcnow()
+        entity_data.last_image_size = len(img)
+        entity_data.last_device_name = device_name
+        entity_data.last_raw_message = payload_dict
 
         _LOGGER.debug(
             "Fetched image for entry %s (content-type=%s size=%s bytes)",
@@ -229,9 +292,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
         )
 
         # Persist bytes asynchronously; don't block webhook response too long
-        hass.async_create_task(_save_last_bytes(hass, entry.entry_id, img))
+        hass.async_create_task(_save_last_bytes(hass, entry.entry_id, entity_key, img))
 
-        async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id)
+        async_dispatcher_send(hass, SIGNAL_UPDATED, entry.entry_id, entity_key)
         return web.Response(text="OK")
 
     # One webhook per entry; HA creates a stable random webhook_id stored in entry
@@ -266,3 +329,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PushImageConfigEntry) ->
 async def async_unload_entry(hass: HomeAssistant, entry: PushImageConfigEntry) -> bool:
     """Unload a Push Image config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload entry when options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
